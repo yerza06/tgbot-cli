@@ -167,3 +167,67 @@ def test_network_error_through_cli_exits_4_and_hides_token(cli, token, monkeypat
     result = cli("send", "hi", "123")
     assert result.exit_code == 4
     assert token not in result.stderr + result.stdout
+
+
+# --------------------------------------------------------------------------- bot selection
+@pytest.fixture
+def two_bots(add_bot, write_config):
+    add_bot("news", "1:NEWS")
+    add_bot("alerts", "2:ALERTS")
+    write_config(default_bot="news")
+
+
+def _token_for(bot=None):
+    from tgbot_cli.config import get_settings
+    from tgbot_cli.telegram import resolve_bot_token
+
+    return resolve_bot_token(get_settings(), bot)
+
+
+def test_bot_precedence(two_bots, monkeypatch):
+    assert _token_for() == ("news", "1:NEWS")
+    monkeypatch.setenv("TGBOT_DEFAULT_BOT", "alerts")
+    assert _token_for() == ("alerts", "2:ALERTS")
+    assert _token_for("news") == ("news", "1:NEWS")
+
+
+def test_unknown_alias(two_bots):
+    from tgbot_cli.db import BotNotFoundError
+
+    with pytest.raises(BotNotFoundError) as excinfo:
+        _token_for("missing")
+    assert "tgbot bot list" in excinfo.value.hint
+
+
+def test_configured_default_bot_missing(add_bot, write_config):
+    from tgbot_cli.db import BotNotFoundError
+
+    add_bot("news", "1:NEWS")
+    write_config(default_bot="gone")
+    with pytest.raises(BotNotFoundError) as excinfo:
+        _token_for()
+    assert "gone" in excinfo.value.message
+    assert "tgbot bot default" in excinfo.value.hint
+
+
+def test_empty_registry(secret_key):
+    from tgbot_cli.db import NoBotsError
+
+    with pytest.raises(NoBotsError) as excinfo:
+        _token_for()
+    assert "tgbot bot add" in excinfo.value.hint
+
+
+def test_bots_but_no_default(add_bot):
+    from tgbot_cli.errors import ConfigError
+
+    add_bot("news", "1:NEWS")
+    with pytest.raises(ConfigError, match="No default bot"):
+        _token_for()
+
+
+def test_selection_errors_make_no_request(cli, two_bots, fake_tg, write_config):
+    assert cli("send", "hi", "1", "--bot", "missing").exit_code == 3
+    write_config(default_bot="gone")
+    assert cli("send", "hi", "1").exit_code == 3
+    assert fake_tg.calls == []

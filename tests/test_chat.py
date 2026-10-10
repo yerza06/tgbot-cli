@@ -124,3 +124,33 @@ def test_remove(cli):
 def test_get_id_json(cli):
     cli("chat", "add", "me", "1")
     assert cli("chat", "get-id", "me", "--json").json() == {"name": "me", "chat_id": "1"}
+
+
+def test_add_resolves_with_default_bot_token(cli, add_bot, write_config, fake_tg):
+    add_bot("news", "1:NEWS")
+    write_config(default_bot="news")
+    assert cli("chat", "add", "chan", "@mychannel").exit_code == 0
+    assert fake_tg.calls[0].token == "1:NEWS"
+
+
+# --------------------------------------------------------------------------- chat default
+def test_default_writes_config(cli, config_dir, write_config):
+    write_config("# prefs\ncolor = false\n")
+    assert cli("chat", "add", "me", "13342324").exit_code == 0
+    result = cli("chat", "default", "me")
+    assert result.exit_code == 0, result.stderr
+    text = (config_dir / "config.toml").read_text()
+    assert 'default_chat = "me"' in text
+    assert "# prefs" in text
+    assert "color = false" in text
+
+
+def test_default_creates_config_file(cli, config_dir):
+    assert cli("chat", "add", "me", "1").exit_code == 0
+    assert cli("chat", "default", "me", "--json").json()["name"] == "me"
+    assert 'default_chat = "me"' in (config_dir / "config.toml").read_text()
+
+
+def test_default_unknown_chat(cli, config_dir):
+    assert cli("chat", "default", "ghost").exit_code == 3
+    assert not (config_dir / "config.toml").exists()

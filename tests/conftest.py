@@ -15,11 +15,15 @@ from typing import Any
 
 import httpx
 import pytest
+import tomlkit
+from cryptography.fernet import Fernet
 
-from tgbot_cli import telegram
+from tgbot_cli import crypto, db, telegram
 from tgbot_cli.cli import run
+from tgbot_cli.config import get_settings
 
 TOKEN = "123456:TEST-SECRET-TOKEN"
+SECRET_KEY = Fernet.generate_key().decode()
 
 
 @dataclass
@@ -33,6 +37,7 @@ class Call:
     method: str
     params: dict[str, Any]
     files: dict[str, Part] = field(default_factory=dict)
+    token: str = ""
 
 
 def _parse_multipart(request: httpx.Request) -> tuple[dict[str, Any], dict[str, Part]]:
@@ -90,7 +95,8 @@ class FakeTelegram:
             params, files = _parse_multipart(request)
         else:
             params, files = (json.loads(request.content) if request.content else {}), {}
-        call = Call(method, params, files)
+        token = request.url.path.rsplit("/", 2)[-2].removeprefix("bot")
+        call = Call(method, params, files, token)
         self.calls.append(call)
 
         for index, (queued_method, status, payload) in enumerate(self._queued):
@@ -134,9 +140,44 @@ def config_dir(isolated_env: Path) -> Path:
 
 
 @pytest.fixture
-def token(monkeypatch: pytest.MonkeyPatch) -> str:
-    monkeypatch.setenv("TGBOT_BOT_TOKEN", TOKEN)
+def secret_key(monkeypatch: pytest.MonkeyPatch) -> str:
+    """A configured TGBOT_SECRET_KEY (environment), without any saved bot."""
+    monkeypatch.setenv("TGBOT_SECRET_KEY", SECRET_KEY)
+    return SECRET_KEY
+
+
+@pytest.fixture
+def add_bot(secret_key: str) -> Callable[..., None]:
+    """Save a bot directly in the database (no network): ``add_bot("alerts", "1:B")``."""
+
+    def add(name: str, token: str, *, bot_id: int = 42, username: str | None = None) -> None:
+        settings = get_settings()
+        blob = crypto.encrypt(crypto.load_key(settings), token)
+        with db.open_db(settings.db_path) as conn:
+            db.add_bot(conn, name, blob, bot_id, username)
+
+    return add
+
+
+@pytest.fixture
+def token(add_bot: Callable[..., None], monkeypatch: pytest.MonkeyPatch) -> str:
+    """A saved default bot ``test`` with ``TOKEN``."""
+    add_bot("test", TOKEN, username="test_bot")
+    monkeypatch.setenv("TGBOT_DEFAULT_BOT", "test")
     return TOKEN
+
+
+@pytest.fixture
+def write_config(config_dir: Path) -> Callable[..., Path]:
+    """Write ``<config_dir>/config.toml``: ``write_config(default_chat="me")`` or raw text."""
+
+    def write(text: str | None = None, **values: Any) -> Path:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        path = config_dir / "config.toml"
+        path.write_text(text if text is not None else tomlkit.dumps(values))
+        return path
+
+    return write
 
 
 @pytest.fixture

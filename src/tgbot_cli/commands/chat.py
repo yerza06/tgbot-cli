@@ -7,9 +7,9 @@ from typing import Annotated
 import typer
 
 from .. import db, telegram
-from ..config import Settings, get_settings
+from ..config import Settings, get_settings, update_config
 from ..console import out
-from ..errors import NetworkError, TelegramAPIError, UsageError
+from ..errors import ConfigError, NetworkError, TelegramAPIError, UsageError
 from ..resolver import parse_chat_id
 from .options import ALLOW_NEG, JsonOpt
 
@@ -30,11 +30,13 @@ def _validate_chat_id(value: str) -> str:
 
 def _resolve_username(settings: Settings, value: str) -> tuple[str, str | None]:
     """Resolve ``@username`` via getChat; fall back to storing the value as given."""
-    if not settings.has_token:
-        out.notice(f"No bot token configured; stored '{value}' as is (not resolved).")
+    try:
+        client = telegram.build_client(settings)
+    except ConfigError as exc:
+        out.notice(f"{exc.message} Stored '{value}' as is (not resolved).")
         return value, None
     try:
-        with telegram.build_client(settings) as client:
+        with client:
             result = client.call("getChat", {"chat_id": value})
     except (TelegramAPIError, NetworkError) as exc:
         out.notice(f"Could not resolve '{value}' ({out.scrub(exc.message)}); stored as is.")
@@ -108,6 +110,20 @@ def get_id(name: NameArg, json_output: JsonOpt = False) -> None:
     with db.open_db(get_settings().db_path) as conn:
         chat = db.get_chat(conn, name)
     out.value(chat.chat_id, data={"name": chat.name, "chat_id": chat.chat_id})
+
+
+@app.command("default")
+def default(name: NameArg, json_output: JsonOpt = False) -> None:
+    """Send to this chat when no target is given (written to config.toml)."""
+    out.use_json(json_output)
+    settings = get_settings()
+    with db.open_db(settings.db_path) as conn:
+        chat = db.get_chat(conn, name)
+    update_config(settings, default_chat=name)
+    out.success(
+        f"Default chat is now '{name}' ({settings.config_file})",
+        data={"ok": True, **chat.to_dict()},
+    )
 
 
 @app.command("replace-id", context_settings=ALLOW_NEG)

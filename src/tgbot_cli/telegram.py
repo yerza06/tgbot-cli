@@ -14,9 +14,10 @@ from typing import IO, Any
 
 import httpx
 
+from . import crypto, db
 from .config import Settings
 from .console import out
-from .errors import NetworkError, TelegramAPIError, TgbotError
+from .errors import ConfigError, NetworkError, TelegramAPIError, TgbotError
 
 SEND_METHODS = frozenset(
     {
@@ -160,9 +161,36 @@ class BotClient:
         raise AssertionError("unreachable")  # pragma: no cover
 
 
-def build_client(settings: Settings) -> BotClient:
-    """Create a client for the configured token (raises ConfigError when none is set)."""
-    token = settings.require_token()
+def resolve_bot_token(settings: Settings, bot: str | None = None) -> tuple[str, str]:
+    """Pick the bot (``bot`` -> ``default_bot`` setting) and decrypt its token.
+
+    Raises ``ConfigError`` subclasses before any network call when no bot is saved, the
+    alias is unknown, or the key is missing or wrong. Returns ``(name, token)``.
+    """
+    from_config = bot is None
+    name = bot if bot is not None else settings.default_bot
+    with db.open_db(settings.db_path) as conn:
+        if not db.list_bots(conn):
+            raise db.NoBotsError()
+        if name is None:
+            raise ConfigError(
+                "No default bot configured.",
+                hint="Pass --bot NAME or set one with `tgbot bot default NAME`.",
+            )
+        if db.find_bot(conn, name) is None:
+            hint = (
+                "The configured default bot does not exist; fix it with `tgbot bot default NAME`."
+                if from_config
+                else "See saved bots with `tgbot bot list`."
+            )
+            raise db.BotNotFoundError(name, hint=hint)
+        blob = db.get_bot_token_enc(conn, name)
+    token = crypto.decrypt(crypto.load_key(settings), blob, bot=name)
+    return name, token
+
+
+def client_for_token(settings: Settings, token: str) -> BotClient:
+    """Create a client for ``token``; the token is masked in all output from now on."""
     out.register_secret(token)
     return BotClient(
         token,
@@ -170,3 +198,9 @@ def build_client(settings: Settings) -> BotClient:
         timeout=settings.timeout,
         transport=TRANSPORT,
     )
+
+
+def build_client(settings: Settings, bot: str | None = None) -> BotClient:
+    """Create a client for the chosen saved bot (``--bot``, else the default bot)."""
+    _, token = resolve_bot_token(settings, bot)
+    return client_for_token(settings, token)

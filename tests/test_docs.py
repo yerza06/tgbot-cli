@@ -10,7 +10,7 @@ README = ROOT / "README.md"
 SKILL = ROOT / "skills" / "tgbot" / "SKILL.md"
 REFERENCE = ROOT / "skills" / "tgbot" / "references" / "reference.md"
 
-SUBGROUPS = {"chat", "token"}
+SUBGROUPS = {"chat", "bot", "key"}
 
 
 def _command_paths(text: str) -> set[tuple[str, ...]]:

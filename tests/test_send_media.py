@@ -108,3 +108,13 @@ def test_extra_tokens(cli, token, fake_tg, workdir):
 def test_caption_parse_mode(cli, token, fake_tg, workdir):
     cli("sendphoto", "shot.png", "me", "<b>x</b>", "--parse-mode", "html")
     assert fake_tg.calls[0].params["parse_mode"] == "HTML"
+
+
+def test_media_bot_flag(cli, add_bot, write_config, fake_tg, workdir):
+    add_bot("news", "1:NEWS")
+    add_bot("alerts", "2:ALERTS")
+    write_config(default_bot="news")
+    result = cli("sendphoto", "https://example.com/a.png", "--to", "1", "--bot", "alerts")
+    assert result.exit_code == 0, result.stderr
+    assert fake_tg.calls[0].method == "sendPhoto"
+    assert fake_tg.calls[0].token == "2:ALERTS"

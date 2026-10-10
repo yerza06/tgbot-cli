@@ -26,6 +26,10 @@ ToOpt = Annotated[
     str | None,
     typer.Option("--to", help="Target: saved chat name, numeric chat ID or @channel."),
 ]
+BotOpt = Annotated[
+    str | None,
+    typer.Option("--bot", help="Saved bot to send as (default: the configured default bot)."),
+]
 CaptionOpt = Annotated[str | None, typer.Option("--caption", help="Caption (max 1024 chars).")]
 SilentOpt = Annotated[bool, typer.Option("--silent", help="Deliver without a notification sound.")]
 ParseModeOpt = Annotated[

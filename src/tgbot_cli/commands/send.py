@@ -38,6 +38,7 @@ from ..resolver import resolve_target
 from ..telegram import BotClient, FileTuple
 from .options import (
     ALLOW_NEG,
+    BotOpt,
     CaptionOpt,
     JsonOpt,
     ParseMode,
@@ -85,7 +86,10 @@ def _extra_args(rest: Sequence[str]) -> UsageError:
 def _no_target() -> UsageError:
     return UsageError(
         "No target chat given.",
-        hint="Pass it positionally or with --to (saved name, numeric ID or @channel).",
+        hint=(
+            "Pass it positionally or with --to (saved name, numeric ID or @channel), "
+            "or set a default with `tgbot chat default NAME`."
+        ),
     )
 
 
@@ -95,8 +99,8 @@ def split_media_args(
     caption: str | None,
     *,
     has_caption: bool = True,
-) -> tuple[list[str], str, str | None]:
-    """Split positional arguments into (content, target, caption)."""
+) -> tuple[list[str], str | None, str | None]:
+    """Split positional arguments into (content, target, caption); target may be None."""
     items = list(items)
     flags_only = to is not None and (caption is not None or not has_caption)
     if flags_only:
@@ -120,20 +124,16 @@ def split_media_args(
         raise UsageError("No media given: pass at least one file path, URL or file_id.")
     if rest:
         raise _extra_args(rest)
-    if to is None:
-        raise _no_target()
     return content, to, caption
 
 
-def pick_target(rest: Sequence[str], to: str | None) -> str:
+def pick_target(rest: Sequence[str], to: str | None) -> str | None:
     """For commands with fixed positional fields: target from ``--to`` or the tail."""
     rest = list(rest)
     if to is None and rest:
         to = rest.pop(0)
     if rest:
         raise _extra_args(rest)
-    if to is None:
-        raise _no_target()
     return to
 
 
@@ -143,15 +143,22 @@ def pick_target(rest: Sequence[str], to: str | None) -> str:
 Sender = Callable[[BotClient, int | str], list[dict[str, Any]]]
 
 
-def _dispatch(target: str, sender: Sender) -> None:
-    """Resolve the target, call ``sender`` and report the sent message IDs."""
-    settings = get_settings()
-    settings.require_token()
-    with db.open_db(settings.db_path) as conn:
-        chat_id = resolve_target(conn, target)
+def _dispatch(target: str | None, sender: Sender, bot: str | None = None) -> None:
+    """Resolve bot and target, call ``sender`` and report the sent message IDs.
 
-    with telegram.build_client(settings) as client, out.status("Sending..."):
-        messages = sender(client, chat_id)
+    Without a target the configured ``default_chat`` is used. Every configuration error
+    (no target, no bot, unknown alias, missing key) is raised before any request.
+    """
+    settings = get_settings()
+    target = target if target is not None else settings.default_chat
+    if target is None:
+        raise _no_target()
+    client = telegram.build_client(settings, bot)
+    with client:
+        with db.open_db(settings.db_path) as conn:
+            chat_id = resolve_target(conn, target)
+        with out.status("Sending..."):
+            messages = sender(client, chat_id)
 
     message_ids = [m["message_id"] for m in messages if "message_id" in m]
     count = len(message_ids)
@@ -190,6 +197,7 @@ def send(
     message: Annotated[str, typer.Argument(help="Message text, or `-` to read stdin.")],
     rest: Annotated[list[str] | None, typer.Argument(help="Target chat.")] = None,
     to: ToOpt = None,
+    bot: BotOpt = None,
     parse_mode: ParseModeOpt = None,
     silent: SilentOpt = False,
     json_output: JsonOpt = False,
@@ -213,7 +221,7 @@ def send(
             for part in parts
         ]
 
-    _dispatch(target, sender)
+    _dispatch(target, sender, bot)
 
 
 # --------------------------------------------------------------------------- #
@@ -302,6 +310,7 @@ def _send_media(
     silent: bool,
     parse_mode: ParseMode | None = None,
     album: bool = False,
+    bot: str | None = None,
 ) -> None:
     content, target, cap = split_media_args(items, to, caption, has_caption=kind.has_caption)
     check_caption(cap)
@@ -316,7 +325,7 @@ def _send_media(
             for index, item in enumerate(inputs)
         ]
 
-    _dispatch(target, sender)
+    _dispatch(target, sender, bot)
 
 
 ItemsArg = Annotated[
@@ -333,6 +342,7 @@ SingleItemsArg = Annotated[
 def sendphoto(
     items: ItemsArg,
     to: ToOpt = None,
+    bot: BotOpt = None,
     caption: CaptionOpt = None,
     parse_mode: ParseModeOpt = None,
     silent: SilentOpt = False,
@@ -340,13 +350,16 @@ def sendphoto(
 ) -> None:
     """Send photo(s); several photos are sent as an album."""
     out.use_json(json_output)
-    _send_media(PHOTO, items, to, caption, silent=silent, parse_mode=parse_mode, album=True)
+    _send_media(
+        PHOTO, items, to, caption, silent=silent, parse_mode=parse_mode, album=True, bot=bot
+    )
 
 
 @app.command(context_settings=ALLOW_NEG)
 def sendfile(
     items: ItemsArg,
     to: ToOpt = None,
+    bot: BotOpt = None,
     caption: CaptionOpt = None,
     group: Annotated[
         bool, typer.Option("--group", "-G", help="Send several documents as one album.")
@@ -357,13 +370,16 @@ def sendfile(
 ) -> None:
     """Send file(s) as documents."""
     out.use_json(json_output)
-    _send_media(DOCUMENT, items, to, caption, silent=silent, parse_mode=parse_mode, album=group)
+    _send_media(
+        DOCUMENT, items, to, caption, silent=silent, parse_mode=parse_mode, album=group, bot=bot
+    )
 
 
 @app.command(context_settings=ALLOW_NEG)
 def sendvideo(
     items: ItemsArg,
     to: ToOpt = None,
+    bot: BotOpt = None,
     caption: CaptionOpt = None,
     parse_mode: ParseModeOpt = None,
     silent: SilentOpt = False,
@@ -371,13 +387,16 @@ def sendvideo(
 ) -> None:
     """Send video(s); several videos are sent as an album."""
     out.use_json(json_output)
-    _send_media(VIDEO, items, to, caption, silent=silent, parse_mode=parse_mode, album=True)
+    _send_media(
+        VIDEO, items, to, caption, silent=silent, parse_mode=parse_mode, album=True, bot=bot
+    )
 
 
 @app.command(context_settings=ALLOW_NEG)
 def sendaudio(
     items: ItemsArg,
     to: ToOpt = None,
+    bot: BotOpt = None,
     caption: CaptionOpt = None,
     parse_mode: ParseModeOpt = None,
     silent: SilentOpt = False,
@@ -385,13 +404,14 @@ def sendaudio(
 ) -> None:
     """Send audio / music file(s)."""
     out.use_json(json_output)
-    _send_media(AUDIO, items, to, caption, silent=silent, parse_mode=parse_mode)
+    _send_media(AUDIO, items, to, caption, silent=silent, parse_mode=parse_mode, bot=bot)
 
 
 @app.command(context_settings=ALLOW_NEG)
 def sendvoice(
     items: ItemsArg,
     to: ToOpt = None,
+    bot: BotOpt = None,
     caption: CaptionOpt = None,
     parse_mode: ParseModeOpt = None,
     silent: SilentOpt = False,
@@ -399,13 +419,14 @@ def sendvoice(
 ) -> None:
     """Send voice message(s) (.ogg with OPUS)."""
     out.use_json(json_output)
-    _send_media(VOICE, items, to, caption, silent=silent, parse_mode=parse_mode)
+    _send_media(VOICE, items, to, caption, silent=silent, parse_mode=parse_mode, bot=bot)
 
 
 @app.command(context_settings=ALLOW_NEG)
 def sendanimation(
     items: ItemsArg,
     to: ToOpt = None,
+    bot: BotOpt = None,
     caption: CaptionOpt = None,
     parse_mode: ParseModeOpt = None,
     silent: SilentOpt = False,
@@ -413,31 +434,33 @@ def sendanimation(
 ) -> None:
     """Send animation(s) (GIF or soundless MP4)."""
     out.use_json(json_output)
-    _send_media(ANIMATION, items, to, caption, silent=silent, parse_mode=parse_mode)
+    _send_media(ANIMATION, items, to, caption, silent=silent, parse_mode=parse_mode, bot=bot)
 
 
 @app.command(context_settings=ALLOW_NEG)
 def sendvideonote(
     items: SingleItemsArg,
     to: ToOpt = None,
+    bot: BotOpt = None,
     silent: SilentOpt = False,
     json_output: JsonOpt = False,
 ) -> None:
     """Send video note(s) (round video messages)."""
     out.use_json(json_output)
-    _send_media(VIDEO_NOTE, items, to, None, silent=silent)
+    _send_media(VIDEO_NOTE, items, to, None, silent=silent, bot=bot)
 
 
 @app.command(context_settings=ALLOW_NEG)
 def sendsticker(
     items: SingleItemsArg,
     to: ToOpt = None,
+    bot: BotOpt = None,
     silent: SilentOpt = False,
     json_output: JsonOpt = False,
 ) -> None:
     """Send sticker(s): .webp/.tgs/.webm file, URL or file_id (use --to for file_id)."""
     out.use_json(json_output)
-    _send_media(STICKER, items, to, None, silent=silent)
+    _send_media(STICKER, items, to, None, silent=silent, bot=bot)
 
 
 # --------------------------------------------------------------------------- #
@@ -453,6 +476,7 @@ def sendcontact(
     first_name: Annotated[str | None, typer.Option("--first-name", help="First name.")] = None,
     last_name: Annotated[str | None, typer.Option("--last-name", help="Last name.")] = None,
     to: ToOpt = None,
+    bot: BotOpt = None,
     silent: SilentOpt = False,
     json_output: JsonOpt = False,
 ) -> None:
@@ -484,7 +508,7 @@ def sendcontact(
             )
         ]
 
-    _dispatch(target, sender)
+    _dispatch(target, sender, bot)
 
 
 def _coordinate(value: str, name: str, bound: float) -> float:
@@ -501,6 +525,7 @@ def _coordinate(value: str, name: str, bound: float) -> float:
 def sendlocation(
     args: Annotated[list[str], typer.Argument(help="LATITUDE LONGITUDE [TARGET]")],
     to: ToOpt = None,
+    bot: BotOpt = None,
     silent: SilentOpt = False,
     json_output: JsonOpt = False,
 ) -> None:
@@ -525,7 +550,7 @@ def sendlocation(
             )
         ]
 
-    _dispatch(target, sender)
+    _dispatch(target, sender, bot)
 
 
 @app.command(context_settings=ALLOW_NEG)
@@ -535,6 +560,7 @@ def sendpoll(
         list[str], typer.Argument(help="2-10 answer options (last one is the target without --to).")
     ],
     to: ToOpt = None,
+    bot: BotOpt = None,
     multiple: Annotated[bool, typer.Option("--multiple", help="Allow several answers.")] = False,
     anonymous: Annotated[
         bool, typer.Option("--anonymous/--no-anonymous", help="Anonymous poll (default).")
@@ -569,13 +595,14 @@ def sendpoll(
             )
         ]
 
-    _dispatch(to, sender)
+    _dispatch(to, sender, bot)
 
 
 @app.command(context_settings=ALLOW_NEG)
 def senddice(
     rest: Annotated[list[str] | None, typer.Argument(help="Target chat.")] = None,
     to: ToOpt = None,
+    bot: BotOpt = None,
     emoji: Annotated[
         str, typer.Option("--emoji", help=f"One of: {' '.join(DICE_EMOJI)}")
     ] = DICE_EMOJI[0],
@@ -591,4 +618,4 @@ def senddice(
     def sender(client: BotClient, chat_id: int | str) -> list[dict[str, Any]]:
         return [client.call("sendDice", {"chat_id": chat_id, "emoji": emoji, **_common(silent)})]
 
-    _dispatch(target, sender)
+    _dispatch(target, sender, bot)

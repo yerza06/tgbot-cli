@@ -78,11 +78,11 @@ def test_json_error_goes_to_stderr(output, capsys):
 
 def test_plain_error_and_hint_on_stderr(output, capsys):
     output.configure(plain=True)
-    output.error(ConfigError("No bot token configured.", hint="Run `tgbot token set`."))
+    output.error(ConfigError("No bot configured.", hint="Run `tgbot bot add NAME`."))
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Error: No bot token configured." in captured.err
-    assert "Hint: Run `tgbot token set`." in captured.err
+    assert "Error: No bot configured." in captured.err
+    assert "Hint: Run `tgbot bot add NAME`." in captured.err
 
 
 def test_secrets_are_scrubbed(output, capsys):
@@ -103,3 +103,45 @@ def test_notice_never_pollutes_stdout(output, capsys):
 def test_emit_json_keeps_unicode(capsys):
     emit_json({"text": "Привет"})
     assert capsys.readouterr().out == '{"text": "Привет"}\n'
+
+
+def _pretend_tty(monkeypatch):
+    """Call inside the test body: capsys installs its stdout only for the call phase."""
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
+
+
+def _write_config(config_dir, text):
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.toml").write_text(text)
+
+
+def test_color_false_in_config_selects_plain(cli, config_dir, monkeypatch):
+    from tgbot_cli.console import out
+
+    _pretend_tty(monkeypatch)
+
+    _write_config(config_dir, "color = false\n")
+    result = cli("chat", "list")
+    assert result.exit_code == 0
+    assert out.mode is Mode.PLAIN
+    assert not ANSI_OR_BOX.search(result.stdout)
+
+
+def test_color_default_keeps_rich_on_a_tty(cli, config_dir, monkeypatch):
+    from tgbot_cli.console import out
+
+    _pretend_tty(monkeypatch)
+
+    assert cli("chat", "list").exit_code == 0
+    assert out.mode is Mode.RICH
+
+
+def test_color_false_does_not_affect_json(cli, config_dir, monkeypatch):
+    from tgbot_cli.console import out
+
+    _pretend_tty(monkeypatch)
+
+    _write_config(config_dir, "color = false\n")
+    result = cli("chat", "list", "--json")
+    assert out.is_json
+    assert result.json() == []

@@ -118,3 +118,70 @@ def test_telegram_rejection_exit_1(cli, token, fake_tg, me):
 def test_plain_flag_output(cli, token, fake_tg, me):
     result = cli("--plain", "send", "hi", "me")
     assert result.stdout == "Sent 1 message to me (13342324)\n"
+
+
+# --------------------------------------------------------------------------- choosing the bot
+@pytest.fixture
+def two_bots(add_bot, write_config):
+    add_bot("news", "1:NEWS")
+    add_bot("alerts", "2:ALERTS")
+    write_config(default_bot="news")
+
+
+def test_default_bot_from_config(cli, two_bots, fake_tg):
+    assert cli("send", "hi", "1").exit_code == 0
+    assert fake_tg.calls[0].token == "1:NEWS"
+
+
+def test_bot_flag(cli, two_bots, fake_tg):
+    assert cli("send", "hi", "1", "--bot", "alerts").exit_code == 0
+    assert fake_tg.calls[0].token == "2:ALERTS"
+
+
+def test_bot_from_environment(cli, two_bots, fake_tg, monkeypatch):
+    monkeypatch.setenv("TGBOT_DEFAULT_BOT", "alerts")
+    assert cli("send", "hi", "1").exit_code == 0
+    assert fake_tg.calls[0].token == "2:ALERTS"
+
+
+def test_unknown_bot_flag(cli, two_bots, fake_tg):
+    result = cli("send", "hi", "1", "--bot", "missing")
+    assert result.exit_code == 3
+    assert "missing" in result.stderr
+    assert "tgbot bot list" in result.stderr
+    assert fake_tg.calls == []
+
+
+def test_no_bots_saved(cli, fake_tg):
+    result = cli("send", "hi", "123")
+    assert result.exit_code == 3
+    assert "tgbot bot add" in result.stderr
+    assert fake_tg.calls == []
+
+
+def test_legacy_token_variable_is_ignored(cli, fake_tg, monkeypatch):
+    monkeypatch.setenv("TGBOT_BOT_TOKEN", "123:LEGACY")
+    result = cli("send", "hi", "123")
+    assert result.exit_code == 3
+    assert "tgbot bot add" in result.stderr
+    assert fake_tg.calls == []
+
+
+def test_removed_key_fails_without_request(cli, two_bots, fake_tg, monkeypatch, config_dir):
+    monkeypatch.delenv("TGBOT_SECRET_KEY")
+    result = cli("send", "hi", "1")
+    assert result.exit_code == 3
+    assert "key" in result.stderr.lower()
+    assert fake_tg.calls == []
+    assert not (config_dir / ".env").exists()
+
+
+def test_wrong_key_fails_without_request(cli, two_bots, fake_tg, monkeypatch):
+    from tgbot_cli.crypto import generate_key
+
+    monkeypatch.setenv("TGBOT_SECRET_KEY", generate_key())
+    result = cli("send", "hi", "1")
+    assert result.exit_code == 3
+    assert "decrypt" in result.stderr
+    assert "1:NEWS" not in result.stderr
+    assert fake_tg.calls == []

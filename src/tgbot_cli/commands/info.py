@@ -6,6 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 import typer
 
+from .. import db
 from ..config import get_settings
 from ..console import out
 from .options import JsonOpt
@@ -26,22 +27,29 @@ def version_line() -> str:
 
 @app.command("version")
 def version_cmd(json_output: JsonOpt = False) -> None:
-    """Show the version, config locations and whether a token is configured."""
+    """Show the version, config locations, saved bots and defaults (never tokens)."""
     out.use_json(json_output)
     settings = get_settings()
-    token_state = "configured" if settings.has_token else "not configured"
+    with db.open_db(settings.db_path) as conn:
+        bots = len(db.list_bots(conn))
     out.key_values(
         version_line(),
         [
             ("Version", package_version()),
             ("Config dir", str(settings.config_dir)),
+            ("Config file", str(settings.config_file)),
             ("Database", str(settings.db_path)),
-            ("Token", token_state),
+            ("Saved bots", str(bots)),
+            ("Default bot", settings.default_bot or "—"),
+            ("Default chat", settings.default_chat or "—"),
         ],
         data={
             "version": package_version(),
             "config_dir": str(settings.config_dir),
+            "config_file": str(settings.config_file),
             "database": str(settings.db_path),
-            "token_configured": settings.has_token,
+            "bots": bots,
+            "default_bot": settings.default_bot,
+            "default_chat": settings.default_chat,
         },
     )

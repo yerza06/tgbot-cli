@@ -68,9 +68,9 @@ def test_no_content(files):
         split_media_args(["me"], None, None)
 
 
-def test_no_target(files):
-    with pytest.raises(UsageError, match="No target"):
-        split_media_args(["a.png"], None, None)
+def test_no_target_is_left_to_the_default_chat(files):
+    assert split_media_args(["a.png"], None, None) == (["a.png"], None, None)
+    assert split_media_args(["a.png"], None, "cap") == (["a.png"], None, "cap")
 
 
 def test_sticker_has_no_caption(files):
@@ -81,9 +81,53 @@ def test_sticker_has_no_caption(files):
 def test_pick_target():
     assert pick_target(["me"], None) == "me"
     assert pick_target([], "me") == "me"
-    with pytest.raises(UsageError, match="No target"):
-        pick_target([], None)
+    assert pick_target([], None) is None
     with pytest.raises(UsageError, match="extra"):
         pick_target(["me", "x"], None)
     with pytest.raises(UsageError, match="extra"):
         pick_target(["x"], "me")
+
+
+# --------------------------------------------------------------------------- default chat
+def test_send_without_target_uses_default_chat(cli, token, fake_tg, write_config):
+    write_config(default_chat="12345")
+    result = cli("send", "hi", "--json")
+    assert result.exit_code == 0, result.stderr
+    assert fake_tg.calls[0].params["chat_id"] == 12345
+
+
+def test_media_without_target_uses_default_chat(cli, token, fake_tg, write_config, files):
+    write_config(default_chat="@mychannel")
+    result = cli("sendphoto", "a.png", "--caption", "cap")
+    assert result.exit_code == 0, result.stderr
+    call = fake_tg.calls[0]
+    assert call.method == "sendPhoto"
+    assert call.params["chat_id"] == "@mychannel"
+    assert call.params["caption"] == "cap"
+
+
+def test_default_chat_can_be_a_saved_alias(cli, token, fake_tg, write_config):
+    assert cli("chat", "add", "me", "777").exit_code == 0
+    write_config(default_chat="me")
+    assert cli("senddice").exit_code == 0
+    assert fake_tg.calls[0].params["chat_id"] == 777
+
+
+def test_explicit_target_wins_over_default(cli, token, fake_tg, write_config):
+    write_config(default_chat="12345")
+    assert cli("send", "hi", "999").exit_code == 0
+    assert fake_tg.calls[0].params["chat_id"] == 999
+
+
+def test_env_default_chat_beats_file(cli, token, fake_tg, write_config, monkeypatch):
+    write_config(default_chat="12345")
+    monkeypatch.setenv("TGBOT_DEFAULT_CHAT", "555")
+    assert cli("send", "hi").exit_code == 0
+    assert fake_tg.calls[0].params["chat_id"] == 555
+
+
+def test_no_target_and_no_default_is_usage_error(cli, token, fake_tg):
+    result = cli("send", "hi")
+    assert result.exit_code == 2
+    assert "tgbot chat default" in result.stderr
+    assert fake_tg.calls == []

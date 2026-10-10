@@ -7,7 +7,8 @@ event.
 `tgbot` only sends. It never calls `getUpdates` or webhooks and never reads anyone's messages:
 the HTTP client refuses every Bot API method except `getMe`, `getChat` and `send*`.
 
-Chat IDs can be saved under short names in a local SQLite database, much like `git remote`.
+Chat IDs and bots can be saved under short names in a local SQLite database, much like
+`git remote`. Several bots are supported; their tokens are stored **encrypted**.
 
 Sibling project: [tguser-cli](https://github.com/yerza06/tguser-cli) does the same as a *user*
 account over MTProto.
@@ -16,7 +17,8 @@ account over MTProto.
 
 Python 3.13 · [uv](https://docs.astral.sh/uv/) · [Typer](https://typer.tiangolo.com/) +
 [Rich](https://rich.readthedocs.io/) · Pydantic-Settings · [httpx](https://www.python-httpx.org/) ·
-SQLite (stdlib `sqlite3`).
+SQLite (stdlib `sqlite3`) · [cryptography](https://cryptography.io/) (Fernet) ·
+[tomlkit](https://tomlkit.readthedocs.io/).
 
 ## Installation
 
@@ -41,13 +43,20 @@ For development, `uv sync` then `uv run tgbot …` from the project root.
 
 ## Setup
 
-1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and copy its token.
-2. Save the token. It is checked with Telegram first, then written to
-   `~/.config/tgbot/.env` with mode 0600:
+1. Create the encryption key for bot tokens. It is written as `TGBOT_SECRET_KEY` to
+   `~/.config/tgbot/.env` (mode 0600); the key itself is never printed:
 
    ```bash
-   tgbot token set          # prompts for the token (input hidden)
-   tgbot whoami             # shows the bot's ID and @username
+   tgbot key init
+   ```
+
+2. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`), copy its token and save it
+   under a name. The token is checked with Telegram first, then stored encrypted. The first bot
+   you add becomes the default one:
+
+   ```bash
+   tgbot bot add main       # prompts for the token (input hidden)
+   tgbot whoami             # shows the default bot's ID and @username
    ```
 
 3. **Open your bot in Telegram and press Start.** A bot cannot start a conversation: every
@@ -57,19 +66,62 @@ For development, `uv sync` then `uv run tgbot …` from the project root.
 
    ```bash
    tgbot chat add me 13342324
+   tgbot chat default me    # optional: send here when no target is given
    ```
 
-You can also configure everything through environment variables (see `.env.example`):
+> **Back up `TGBOT_SECRET_KEY`.** Without it the saved tokens cannot be decrypted, and every bot
+> has to be added again. `tgbot key init --force` replaces the key with the same effect. For
+> stronger isolation keep the key in your environment or a secrets manager instead of `.env`.
+
+### Bots
+
+```bash
+tgbot bot add alerts 123456:ABC...      # token as an argument (non-interactive)
+tgbot bot list                          # aliases, @usernames, IDs, default (or just `tgbot bot`)
+tgbot bot default alerts                # change the default bot
+tgbot bot rename alerts ops             # rename
+tgbot bot remove ops                    # delete the bot and its token
+tgbot send "hi" me --bot ops            # send as a specific bot
+tgbot whoami --bot ops
+```
+
+The bot is chosen in this order: `--bot`, then `TGBOT_DEFAULT_BOT`, then `default_bot` from
+`config.toml`.
+
+### Configuration file
+
+Preferences live in `~/.config/tgbot/config.toml` (optional; `bot default` and `chat default`
+write it for you, keeping your comments):
+
+```toml
+default_bot = "main"      # bot used without --bot
+default_chat = "me"       # target used when none is given (alias, numeric ID or @channel)
+color = false             # plain output: no colors or boxes
+timeout = 30              # HTTP timeout, seconds
+api_url = "https://api.telegram.org"   # e.g. a local Bot API server
+```
+
+Every key can be overridden with an environment variable (`TGBOT_` + the upper-cased key) or in
+`~/.config/tgbot/.env`. Precedence: command-line flag → environment → `.env` → `config.toml` →
+built-in default. `.env` is meant for the secret key; see `.env.example`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TGBOT_BOT_TOKEN` | — | Bot token; overrides the one in `.env` |
-| `TGBOT_CONFIG_DIR` | `~/.config/tgbot` | Where `.env` and `tgbot.db` live |
+| `TGBOT_SECRET_KEY` | — | Key that encrypts saved bot tokens (`tgbot key init`) |
+| `TGBOT_DEFAULT_BOT` | — | Default bot alias |
+| `TGBOT_DEFAULT_CHAT` | — | Default target |
+| `TGBOT_CONFIG_DIR` | `~/.config/tgbot` | Where `.env`, `config.toml` and `tgbot.db` live |
 | `TGBOT_PLAIN` | `false` | Disable Rich styling |
 | `TGBOT_TIMEOUT` | `30` | HTTP timeout in seconds |
 | `TGBOT_API_URL` | `https://api.telegram.org` | Bot API server (e.g. a local Bot API server) |
 
-> Do not delete `~/.config/tgbot/tgbot.db`: it holds all your saved chat aliases.
+> Do not delete `~/.config/tgbot/tgbot.db`: it holds your saved chats and (encrypted) bots.
+
+### Upgrading from a single-token version
+
+`TGBOT_BOT_TOKEN` and the old `token set` command are gone. Run `tgbot key init` and
+`tgbot bot add main` once, then delete the `TGBOT_BOT_TOKEN=` line from `~/.config/tgbot/.env`:
+it is ignored but still holds the token in plain text.
 
 ## Chat aliases
 
@@ -82,14 +134,16 @@ tgbot chat get-id team                  # print the bare ID
 tgbot chat replace-id team -100999      # point the alias elsewhere
 tgbot chat rename team devs             # rename
 tgbot chat remove devs                  # delete
+tgbot chat default me                   # default target (written to config.toml)
 ```
 
 A target can be a **saved alias**, a **numeric chat ID** or a **`@channel` username**. Aliases are
-checked first.
+checked first. Without a target, the configured `default_chat` is used.
 
 ## Sending
 
-Every command accepts two syntaxes: flags (`--to`, `--caption`) or positional arguments.
+Every command accepts two syntaxes: flags (`--to`, `--caption`) or positional arguments, and
+`--bot NAME` to send as a saved bot other than the default.
 
 ```bash
 # Text (plain by default; long text is split into several messages)
@@ -126,7 +180,9 @@ tgbot senddice me --emoji 🎯
 How positional arguments are read: leading tokens that are existing files or URLs are the media.
 The next token is the target, and the one after it is the caption. Leftover tokens are an error,
 so a typo never sends to the wrong chat. A Telegram `file_id` is only recognised when you pass
-`--to` (plus `--caption` for commands that have one).
+`--to` (plus `--caption` for commands that have one). With a `default_chat` you may omit the
+target, but a positional token after the media is still read as the target, so give the caption
+with `--caption`: `tgbot sendphoto shot.png --caption "Screenshot"`.
 
 Limits are checked before uploading: files up to 50 MB, photos up to 10 MB, captions up to
 1024 characters.
@@ -136,7 +192,7 @@ Limits are checked before uploading: files up to 50 MB, photos up to 10 MB, capt
 | Mode | How |
 |---|---|
 | Rich (panels, colors) | default in a terminal |
-| Plain text | `tgbot --plain …`, `TGBOT_PLAIN=1`, `NO_COLOR=1`, or stdout not a TTY |
+| Plain text | `tgbot --plain …`, `TGBOT_PLAIN=1`, `NO_COLOR=1`, `color = false` in `config.toml`, or stdout not a TTY |
 | JSON | `--json` (global or on any command) |
 
 ```console
@@ -152,11 +208,11 @@ $ tgbot send "hi" boss --json        # error JSON goes to stderr
 | `0` | Success |
 | `1` | Telegram rejected the request (e.g. 403: the recipient has not pressed Start) |
 | `2` | Usage error: bad arguments, missing file, limit exceeded |
-| `3` | Configuration error: no token, unknown alias, alias exists or not found |
+| `3` | Configuration error: no bot or key, unknown bot or chat alias, alias exists, bad config file |
 | `4` | Network error: Telegram unreachable or timed out |
 | `130` | Interrupted |
 
-The bot token never appears in any output.
+Bot tokens and the encryption key never appear in any output.
 
 ## Agent Skill
 
@@ -175,12 +231,13 @@ uv run pytest
 ```
 src/tgbot_cli/
 ├── cli.py         # root Typer app, exit-code mapping
-├── config.py      # pydantic-settings (TGBOT_*, ~/.config/tgbot/.env)
+├── config.py      # pydantic-settings (TGBOT_*, .env, config.toml)
+├── crypto.py      # Fernet encryption of saved bot tokens
 ├── console.py     # output facade: rich | plain | json
 ├── errors.py      # error hierarchy -> exit codes
 ├── telegram.py    # write-only Bot API client (allowlist)
-├── db.py          # sqlite3 chat aliases
+├── db.py          # sqlite3 chat aliases and saved bots
 ├── resolver.py    # alias -> chat_id
 ├── media.py       # file/URL/file_id inputs, limits, text chunking
-└── commands/      # token, chat, send, info
+└── commands/      # bot, key, chat, send, info
 ```

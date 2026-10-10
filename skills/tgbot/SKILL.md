@@ -2,14 +2,14 @@
 name: tgbot
 description: >-
   Send Telegram notifications AS A BOT (Bot API) via the write-only `tgbot` CLI: text, photos,
-  files, videos, audio, voice, stickers, contacts, locations, polls and dice. Manages saved chat
-  aliases like `git remote`. Use whenever the user wants to be notified, or wants someone else
+  files, videos, audio, voice, stickers, contacts, locations, polls and dice, from one or several
+  saved bots. Manages saved chat aliases like `git remote`. Use whenever the user wants to be notified, or wants someone else
   notified, on Telegram about an event: "notify me on Telegram when the build finishes", "send
   this file to Telegram", "ping the team chat", "post to my channel". Also covers Russian
   phrasing ("уведоми в телеграм", "отправь в телеграм", "скинь файл в телеграм"). tgbot cannot
   read messages, so it is not for checking replies.
 license: MIT
-compatibility: Requires Python 3.13+, uv, and a bot token set once by a human.
+compatibility: Requires Python 3.13+, uv, and a bot added once by a human (`tgbot key init`, `tgbot bot add`).
 metadata:
   author: yerza06
   version: "0.1.0"
@@ -19,9 +19,10 @@ metadata:
 
 `tgbot` sends messages and media to Telegram **from a bot** through the Bot API. It is
 **write-only**: it never reads messages, so you cannot use it to wait for or check replies.
-Chats are saved under short names in a local SQLite database, like `git remote`.
+Chats and bots are saved under short names in a local SQLite database, like `git remote`; bot
+tokens are stored encrypted.
 
-## 1. Check the tool and the token
+## 1. Check the tool and the bot
 
 ```bash
 command -v tgbot && tgbot whoami --json
@@ -29,9 +30,17 @@ command -v tgbot && tgbot whoami --json
 
 - `tgbot` missing: install it from a clone with `uv tool install .`. Always install globally;
   never use `uv run tgbot` outside the repo.
-- Exit code `3` (no token): **ask the user** to run `tgbot token set` (in Claude Code: `! tgbot
-  token set`). The token comes from @BotFather and is a secret, so never ask for it in chat and
-  never print it.
+- Exit code `3` with a missing key: **ask the user** to run `tgbot key init` (in Claude Code:
+  `! tgbot key init`). Exit code `3` with "No bot configured": ask them to run
+  `tgbot bot add NAME` (`! tgbot bot add main`). The token comes from @BotFather and is a secret:
+  never ask for it in chat, never print it or `TGBOT_SECRET_KEY`, and never run `tgbot key init
+  --force` yourself (it makes every saved bot unusable).
+
+### Several bots
+
+`tgbot bot list --json` shows the saved bots (`name`, `username`, `is_default`; never tokens).
+Without `--bot` the default bot sends. Use `--bot NAME` on any send command or `whoami` when the
+user asks for a specific bot.
 
 ## 2. Pick a target
 
@@ -43,6 +52,10 @@ command -v tgbot && tgbot whoami --json
 
 There is **no built-in "me"**. It is just a common alias name. If `tgbot chat list` shows no
 suitable alias, ask the user for the chat ID and save it with `tgbot chat add NAME ID`.
+
+The user may have set a default chat (`tgbot chat default NAME`), which is used when no target is
+given. **Still pass `--to` explicitly** unless the user asked you to use the default chat, so a
+message never goes to the wrong place.
 
 **The recipient must have pressed Start in the bot** (or the bot must be in the group). A 403
 error means they have not; tell the user, and do not retry.
@@ -59,6 +72,7 @@ tgbot sendfile ./report.pdf --to team --caption "Q4 report" --json
 tgbot sendfile a.log b.log --to me --group --json                   # one album
 tgbot sendlocation 43.238 76.889 --to me --json
 tgbot sendpoll "Deploy now?" Yes No --to team --json
+tgbot send "Deploy started" --to team --bot ops --json              # as a specific bot
 ```
 
 | Command | Sends |
@@ -86,7 +100,7 @@ Failures print `{"ok": false, "error": "…", "code": N, "hint": "…"}` on **st
 | `0` | Sent | — |
 | `1` | Telegram refused | Read `error`; 403 means the recipient must press Start |
 | `2` | Bad usage, missing file, limit exceeded | Fix the command |
-| `3` | No token, or unknown or duplicate alias | Ask the user, or `tgbot chat add` |
+| `3` | No key or bot, unknown bot or chat alias, duplicate alias, broken config file | Ask the user, or `tgbot chat add` |
 | `4` | Network failure | Retry later |
 
 ## Chat aliases
@@ -99,6 +113,7 @@ tgbot chat get-id me               # bare ID on stdout
 tgbot chat rename OLD NEW / replace-id NAME ID / remove NAME
 ```
 
-Do not delete `~/.config/tgbot/` (`.env` holds the token, `tgbot.db` the aliases).
+Do not delete or edit `~/.config/tgbot/`: `.env` holds the encryption key, `tgbot.db` the
+chats and encrypted bots, `config.toml` the user's defaults.
 
 More: [`references/reference.md`](references/reference.md).

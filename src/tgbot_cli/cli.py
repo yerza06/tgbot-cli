@@ -8,7 +8,7 @@ from typing import Annotated
 
 import typer
 
-from .commands import chat, info, send, token
+from .commands import bot, chat, info, key, send
 from .config import get_settings
 from .console import out
 from .errors import TgbotError, UsageError
@@ -21,9 +21,12 @@ app = typer.Typer(
     rich_markup_mode=None,
 )
 
-# Credentials commands: tgbot token set / tgbot whoami.
-app.add_typer(token.app, name="token")
-app.registered_commands.extend(token.top_level.registered_commands)
+# Saved bots: tgbot bot add/list/… and tgbot whoami.
+app.add_typer(bot.app, name="bot")
+app.registered_commands.extend(bot.top_level.registered_commands)
+
+# Encryption key for saved bot tokens (tgbot key init).
+app.add_typer(key.app, name="key")
 
 # Chat alias management (tgbot chat …).
 app.add_typer(chat.app, name="chat")
@@ -61,7 +64,8 @@ def _main(
     ] = False,
 ) -> None:
     """tgbot — send Telegram messages as a bot."""
-    out.configure(plain=plain or get_settings().plain, json_output=json_output)
+    settings = get_settings()
+    out.configure(plain=plain or settings.plain or not settings.color, json_output=json_output)
 
 
 def run(argv: Sequence[str] | None = None) -> int:
