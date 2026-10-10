@@ -1,0 +1,9 @@
+schema: spec-driven
+
+context: |
+  CLI инструмент который можно отправлять сообщение от имени Telegram Bot. Стек Python 3.13
+
+rules:
+  tasks:
+    - Каждая задача должна включать тесты (pytest)
+    - Не забывай использовать ruff

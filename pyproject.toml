@@ -1,0 +1,39 @@
+[project]
+name = "tgbot-cli"
+version = "0.1.0"
+description = "Write-only CLI for sending Telegram messages as a bot, for AI agents"
+readme = "README.md"
+authors = [
+    { name = "Yernaz Kengesbekov", email = "yernazkenesbekov24@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.15.0",
+    "rich>=15.0.0",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+tgbot = "tgbot_cli.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
