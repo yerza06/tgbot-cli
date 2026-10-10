@@ -7,6 +7,8 @@ from typing import Annotated
 
 import typer
 
+from ..completion import complete_bot, complete_chat
+
 # Telegram group/channel IDs are negative (-100…) and coordinates can be negative.
 # Without this, Click treats such tokens as unknown options.
 ALLOW_NEG = {"ignore_unknown_options": True}
@@ -24,11 +26,19 @@ class ParseMode(StrEnum):
 JsonOpt = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 ToOpt = Annotated[
     str | None,
-    typer.Option("--to", help="Target: saved chat name, numeric chat ID or @channel."),
+    typer.Option(
+        "--to",
+        help="Target: saved chat name, numeric chat ID or @channel.",
+        autocompletion=complete_chat,
+    ),
 ]
 BotOpt = Annotated[
     str | None,
-    typer.Option("--bot", help="Saved bot to send as (default: the configured default bot)."),
+    typer.Option(
+        "--bot",
+        help="Saved bot to send as (default: the configured default bot).",
+        autocompletion=complete_bot,
+    ),
 ]
 CaptionOpt = Annotated[str | None, typer.Option("--caption", help="Caption (max 1024 chars).")]
 SilentOpt = Annotated[bool, typer.Option("--silent", help="Deliver without a notification sound.")]

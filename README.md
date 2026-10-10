@@ -123,6 +123,44 @@ built-in default. `.env` is meant for the secret key; see `.env.example`.
 `tgbot bot add main` once, then delete the `TGBOT_BOT_TOKEN=` line from `~/.config/tgbot/.env`:
 it is ignored but still holds the token in plain text.
 
+## Shell completion
+
+Like `git`, `tgbot` completes on <kbd>Tab</kbd>: commands, options after `-` (with their
+descriptions), `--parse-mode` and `--emoji` values, and your **saved chats and bots**. Chats are
+suggested for `--to`, the target of `send`/`senddice`/media commands and `tgbot chat
+remove|rename|get-id|default|replace-id`. Bots are suggested for `--bot` and `tgbot bot
+remove|rename|default`. Completion only reads `tgbot.db`: it needs no key and never prints
+errors.
+
+**zsh with oh-my-zsh.** Save the script once into a directory on `fpath`:
+
+```bash
+mkdir -p ~/.oh-my-zsh/custom/completions
+{ tgbot --show-completion zsh; echo '_tgbot_completion "$@"'; } \
+  > ~/.oh-my-zsh/custom/completions/_tgbot
+```
+
+The extra last line makes the very first <kbd>Tab</kbd> complete too: without it, zsh only
+loads the script on the first press and completes from the second one.
+
+Then add this line to `~/.zshrc` **before** `source $ZSH/oh-my-zsh.sh`, and restart the shell
+with `rm -f ~/.zcompdump*; exec zsh`:
+
+```zsh
+fpath+=~/.oh-my-zsh/custom/completions
+```
+
+**Plain zsh, bash, fish.** `tgbot --install-completion zsh` (or `bash`, `fish`) writes the
+script and the shell setup for you; open a new shell afterwards.
+
+Avoid `eval "$(tgbot --show-completion zsh)"` in `~/.zshrc`: it starts Python on every new
+shell. Re-run the command above after upgrading `tgbot` only if the script itself changes;
+the suggestions are computed live.
+
+In media commands the first arguments are files, so <kbd>Tab</kbd> completes paths. After a
+file, saved chats are offered when one matches what you typed; start the word with `./` to
+complete another file instead (`tgbot sendphoto a.png ./<Tab>`).
+
 ## Chat aliases
 
 ```bash

@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 
 from .. import db, telegram
+from ..completion import complete_chat
 from ..config import Settings, get_settings, update_config
 from ..console import out
 from ..errors import ConfigError, NetworkError, TelegramAPIError, UsageError
@@ -16,6 +17,9 @@ from .options import ALLOW_NEG, JsonOpt
 app = typer.Typer(help="Manage saved chat aliases (like `git remote`).")
 
 NameArg = Annotated[str, typer.Argument(help="Alias name, e.g. `me` or `team`.")]
+ExistingNameArg = Annotated[
+    str, typer.Argument(help="Saved alias name, e.g. `me`.", autocompletion=complete_chat)
+]
 
 
 def _validate_chat_id(value: str) -> str:
@@ -104,7 +108,7 @@ def list_cmd(json_output: JsonOpt = False) -> None:
 
 
 @app.command("get-id")
-def get_id(name: NameArg, json_output: JsonOpt = False) -> None:
+def get_id(name: ExistingNameArg, json_output: JsonOpt = False) -> None:
     """Print only the chat ID of an alias."""
     out.use_json(json_output)
     with db.open_db(get_settings().db_path) as conn:
@@ -113,7 +117,7 @@ def get_id(name: NameArg, json_output: JsonOpt = False) -> None:
 
 
 @app.command("default")
-def default(name: NameArg, json_output: JsonOpt = False) -> None:
+def default(name: ExistingNameArg, json_output: JsonOpt = False) -> None:
     """Send to this chat when no target is given (written to config.toml)."""
     out.use_json(json_output)
     settings = get_settings()
@@ -128,7 +132,7 @@ def default(name: NameArg, json_output: JsonOpt = False) -> None:
 
 @app.command("replace-id", context_settings=ALLOW_NEG)
 def replace_id(
-    name: NameArg,
+    name: ExistingNameArg,
     new_id: Annotated[str, typer.Argument(help="New numeric chat ID or @channel.")],
     json_output: JsonOpt = False,
 ) -> None:
@@ -142,7 +146,9 @@ def replace_id(
 
 @app.command("rename")
 def rename(
-    old_name: Annotated[str, typer.Argument(help="Current alias name.")],
+    old_name: Annotated[
+        str, typer.Argument(help="Current alias name.", autocompletion=complete_chat)
+    ],
     new_name: Annotated[str, typer.Argument(help="New alias name.")],
     json_output: JsonOpt = False,
 ) -> None:
@@ -154,7 +160,7 @@ def rename(
 
 
 @app.command("remove")
-def remove(name: NameArg, json_output: JsonOpt = False) -> None:
+def remove(name: ExistingNameArg, json_output: JsonOpt = False) -> None:
     """Delete an alias."""
     out.use_json(json_output)
     with db.open_db(get_settings().db_path) as conn:

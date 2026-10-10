@@ -10,6 +10,7 @@ Read this when `SKILL.md` is not enough.
 | `--json` | JSON output; also accepted on every command |
 | `--version`, `-V` | Print `tgbot X.Y.Z` |
 | `--help` | Help for any command |
+| `--install-completion`, `--show-completion` | Shell completion (zsh, bash, fish); see the README |
 
 ## Key, bots and identity
 

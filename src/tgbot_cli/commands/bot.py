@@ -11,6 +11,7 @@ from typing import Annotated, Any
 import typer
 
 from .. import crypto, db, telegram
+from ..completion import complete_bot
 from ..config import Settings, config_file_value, get_settings, update_config
 from ..console import out
 from ..errors import TelegramAPIError, UsageError
@@ -20,6 +21,9 @@ app = typer.Typer(help="Manage saved bots (token aliases, like `tgbot chat`).")
 top_level = typer.Typer()
 
 NameArg = Annotated[str, typer.Argument(help="Bot alias, e.g. `news` or `alerts`.")]
+ExistingNameArg = Annotated[
+    str, typer.Argument(help="Saved bot alias, e.g. `main`.", autocompletion=complete_bot)
+]
 
 
 def _bot_label(username: str | None, bot_id: Any) -> str:
@@ -119,7 +123,7 @@ def list_cmd(json_output: JsonOpt = False) -> None:
 
 
 @app.command("default")
-def default(name: NameArg, json_output: JsonOpt = False) -> None:
+def default(name: ExistingNameArg, json_output: JsonOpt = False) -> None:
     """Make NAME the default bot (written to config.toml)."""
     out.use_json(json_output)
     settings = get_settings()
@@ -134,7 +138,9 @@ def default(name: NameArg, json_output: JsonOpt = False) -> None:
 
 @app.command("rename")
 def rename(
-    old_name: Annotated[str, typer.Argument(help="Current bot alias.")],
+    old_name: Annotated[
+        str, typer.Argument(help="Current bot alias.", autocompletion=complete_bot)
+    ],
     new_name: Annotated[str, typer.Argument(help="New bot alias.")],
     json_output: JsonOpt = False,
 ) -> None:
@@ -151,7 +157,7 @@ def rename(
 
 
 @app.command("remove")
-def remove(name: NameArg, json_output: JsonOpt = False) -> None:
+def remove(name: ExistingNameArg, json_output: JsonOpt = False) -> None:
     """Delete a saved bot and its token."""
     out.use_json(json_output)
     settings = get_settings()

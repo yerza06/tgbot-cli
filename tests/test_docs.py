@@ -14,11 +14,15 @@ SUBGROUPS = {"chat", "bot", "key"}
 
 
 def _command_paths(text: str) -> set[tuple[str, ...]]:
-    """``tgbot <cmd> [<sub>]`` invocations found in the text (options excluded)."""
+    """``tgbot <cmd> [<sub>]`` invocations found in the text (options excluded).
+
+    Invocations that start with an option (``tgbot --show-completion zsh``) name no command.
+    """
     paths: set[tuple[str, ...]] = set()
     for match in re.finditer(r"\btgbot((?:[ \t]+-{0,2}[a-z][a-z-]*)+)", text):
-        words = [w for w in match.group(1).split() if not w.startswith("-")]
-        if not words:
+        tokens = match.group(1).split()
+        words = [w for w in tokens if not w.startswith("-")]
+        if not words or tokens[0].startswith("-"):  # `tgbot --opt value`: no command
             continue
         path = tuple(words[:2]) if words[0] in SUBGROUPS and len(words) > 1 else (words[0],)
         paths.add(path)
@@ -68,3 +72,9 @@ def test_skill_mentions_every_send_command(cli):
     skill = SKILL.read_text()
     missing = {c for c in commands if f"`{c}" not in skill and f" {c} " not in skill}
     assert not missing
+
+
+def test_option_first_invocations_name_no_command():
+    assert _command_paths("tgbot --install-completion zsh\ntgbot chat add me 1") == {
+        ("chat", "add")
+    }

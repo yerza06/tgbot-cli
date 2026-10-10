@@ -22,6 +22,7 @@ from typing import Annotated, Any
 import typer
 
 from .. import db, telegram
+from ..completion import complete_chat, complete_target_after_media
 from ..config import get_settings
 from ..console import out
 from ..errors import UsageError
@@ -51,6 +52,12 @@ app = typer.Typer()
 
 MEDIA_GROUP_MAX_ITEMS = 10
 DICE_EMOJI = ("🎲", "🎯", "🏀", "⚽", "🎳", "🎰")
+
+
+def complete_dice_emoji(incomplete: str) -> list[str]:
+    return [emoji for emoji in DICE_EMOJI if emoji.startswith(incomplete)]
+
+
 POLL_MIN_OPTIONS = 2
 POLL_MAX_OPTIONS = 10
 
@@ -195,7 +202,9 @@ def _read_message(message: str) -> str:
 @app.command(context_settings=ALLOW_NEG)
 def send(
     message: Annotated[str, typer.Argument(help="Message text, or `-` to read stdin.")],
-    rest: Annotated[list[str] | None, typer.Argument(help="Target chat.")] = None,
+    rest: Annotated[
+        list[str] | None, typer.Argument(help="Target chat.", autocompletion=complete_chat)
+    ] = None,
     to: ToOpt = None,
     bot: BotOpt = None,
     parse_mode: ParseModeOpt = None,
@@ -330,11 +339,17 @@ def _send_media(
 
 ItemsArg = Annotated[
     list[str],
-    typer.Argument(help="File path(s), URL(s) or file_id(s), then [TARGET] [CAPTION]."),
+    typer.Argument(
+        help="File path(s), URL(s) or file_id(s), then [TARGET] [CAPTION].",
+        autocompletion=complete_target_after_media,
+    ),
 ]
 SingleItemsArg = Annotated[
     list[str],
-    typer.Argument(help="File path(s), URL(s) or file_id(s), then [TARGET]."),
+    typer.Argument(
+        help="File path(s), URL(s) or file_id(s), then [TARGET].",
+        autocompletion=complete_target_after_media,
+    ),
 ]
 
 
@@ -600,11 +615,18 @@ def sendpoll(
 
 @app.command(context_settings=ALLOW_NEG)
 def senddice(
-    rest: Annotated[list[str] | None, typer.Argument(help="Target chat.")] = None,
+    rest: Annotated[
+        list[str] | None, typer.Argument(help="Target chat.", autocompletion=complete_chat)
+    ] = None,
     to: ToOpt = None,
     bot: BotOpt = None,
     emoji: Annotated[
-        str, typer.Option("--emoji", help=f"One of: {' '.join(DICE_EMOJI)}")
+        str,
+        typer.Option(
+            "--emoji",
+            help=f"One of: {' '.join(DICE_EMOJI)}",
+            autocompletion=complete_dice_emoji,
+        ),
     ] = DICE_EMOJI[0],
     silent: SilentOpt = False,
     json_output: JsonOpt = False,
